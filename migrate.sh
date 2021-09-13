@@ -1,0 +1,1 @@
+migrate -path migrations -database postgres://jaunty:jaunty@localhost:5430/jaunty\?sslmode=disable up
