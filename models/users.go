@@ -72,13 +72,16 @@ var UserWhere = struct {
 
 // UserRels is where relationship names are stored.
 var UserRels = struct {
+	SFDiscordToken      string
 	SFMinecraftAccounts string
 }{
+	SFDiscordToken:      "SFDiscordToken",
 	SFMinecraftAccounts: "SFMinecraftAccounts",
 }
 
 // userR is where relationships are stored.
 type userR struct {
+	SFDiscordToken      *DiscordToken         `boil:"SFDiscordToken" json:"SFDiscordToken" toml:"SFDiscordToken" yaml:"SFDiscordToken"`
 	SFMinecraftAccounts MinecraftAccountSlice `boil:"SFMinecraftAccounts" json:"SFMinecraftAccounts" toml:"SFMinecraftAccounts" yaml:"SFMinecraftAccounts"`
 }
 
@@ -188,6 +191,20 @@ func (q userQuery) Exists(ctx context.Context, exec boil.ContextExecutor) (bool,
 	return count > 0, nil
 }
 
+// SFDiscordToken pointed to by the foreign key.
+func (o *User) SFDiscordToken(mods ...qm.QueryMod) discordTokenQuery {
+	queryMods := []qm.QueryMod{
+		qm.Where("\"sf\" = ?", o.SF),
+	}
+
+	queryMods = append(queryMods, mods...)
+
+	query := DiscordTokens(queryMods...)
+	queries.SetFrom(query.Query, "\"discord_tokens\"")
+
+	return query
+}
+
 // SFMinecraftAccounts retrieves all the minecraft_account's MinecraftAccounts with an executor via sf column.
 func (o *User) SFMinecraftAccounts(mods ...qm.QueryMod) minecraftAccountQuery {
 	var queryMods []qm.QueryMod
@@ -207,6 +224,99 @@ func (o *User) SFMinecraftAccounts(mods ...qm.QueryMod) minecraftAccountQuery {
 	}
 
 	return query
+}
+
+// LoadSFDiscordToken allows an eager lookup of values, cached into the
+// loaded structs of the objects. This is for a 1-1 relationship.
+func (userL) LoadSFDiscordToken(ctx context.Context, e boil.ContextExecutor, singular bool, maybeUser interface{}, mods queries.Applicator) error {
+	var slice []*User
+	var object *User
+
+	if singular {
+		object = maybeUser.(*User)
+	} else {
+		slice = *maybeUser.(*[]*User)
+	}
+
+	args := make([]interface{}, 0, 1)
+	if singular {
+		if object.R == nil {
+			object.R = &userR{}
+		}
+		args = append(args, object.SF)
+	} else {
+	Outer:
+		for _, obj := range slice {
+			if obj.R == nil {
+				obj.R = &userR{}
+			}
+
+			for _, a := range args {
+				if a == obj.SF {
+					continue Outer
+				}
+			}
+
+			args = append(args, obj.SF)
+		}
+	}
+
+	if len(args) == 0 {
+		return nil
+	}
+
+	query := NewQuery(
+		qm.From(`discord_tokens`),
+		qm.WhereIn(`discord_tokens.sf in ?`, args...),
+	)
+	if mods != nil {
+		mods.Apply(query)
+	}
+
+	results, err := query.QueryContext(ctx, e)
+	if err != nil {
+		return errors.Wrap(err, "failed to eager load DiscordToken")
+	}
+
+	var resultSlice []*DiscordToken
+	if err = queries.Bind(results, &resultSlice); err != nil {
+		return errors.Wrap(err, "failed to bind eager loaded slice DiscordToken")
+	}
+
+	if err = results.Close(); err != nil {
+		return errors.Wrap(err, "failed to close results of eager load for discord_tokens")
+	}
+	if err = results.Err(); err != nil {
+		return errors.Wrap(err, "error occurred during iteration of eager loaded relations for discord_tokens")
+	}
+
+	if len(resultSlice) == 0 {
+		return nil
+	}
+
+	if singular {
+		foreign := resultSlice[0]
+		object.R.SFDiscordToken = foreign
+		if foreign.R == nil {
+			foreign.R = &discordTokenR{}
+		}
+		foreign.R.SFUser = object
+	}
+
+	for _, local := range slice {
+		for _, foreign := range resultSlice {
+			if local.SF == foreign.SF {
+				local.R.SFDiscordToken = foreign
+				if foreign.R == nil {
+					foreign.R = &discordTokenR{}
+				}
+				foreign.R.SFUser = local
+				break
+			}
+		}
+	}
+
+	return nil
 }
 
 // LoadSFMinecraftAccounts allows an eager lookup of values, cached into the
@@ -297,6 +407,57 @@ func (userL) LoadSFMinecraftAccounts(ctx context.Context, e boil.ContextExecutor
 		}
 	}
 
+	return nil
+}
+
+// SetSFDiscordToken of the user to the related item.
+// Sets o.R.SFDiscordToken to related.
+// Adds o to related.R.SFUser.
+func (o *User) SetSFDiscordToken(ctx context.Context, exec boil.ContextExecutor, insert bool, related *DiscordToken) error {
+	var err error
+
+	if insert {
+		related.SF = o.SF
+
+		if err = related.Insert(ctx, exec, boil.Infer()); err != nil {
+			return errors.Wrap(err, "failed to insert into foreign table")
+		}
+	} else {
+		updateQuery := fmt.Sprintf(
+			"UPDATE \"discord_tokens\" SET %s WHERE %s",
+			strmangle.SetParamNames("\"", "\"", 1, []string{"sf"}),
+			strmangle.WhereClause("\"", "\"", 2, discordTokenPrimaryKeyColumns),
+		)
+		values := []interface{}{o.SF, related.ID}
+
+		if boil.IsDebug(ctx) {
+			writer := boil.DebugWriterFrom(ctx)
+			fmt.Fprintln(writer, updateQuery)
+			fmt.Fprintln(writer, values)
+		}
+		if _, err = exec.ExecContext(ctx, updateQuery, values...); err != nil {
+			return errors.Wrap(err, "failed to update foreign table")
+		}
+
+		related.SF = o.SF
+
+	}
+
+	if o.R == nil {
+		o.R = &userR{
+			SFDiscordToken: related,
+		}
+	} else {
+		o.R.SFDiscordToken = related
+	}
+
+	if related.R == nil {
+		related.R = &discordTokenR{
+			SFUser: o,
+		}
+	} else {
+		related.R.SFUser = o
+	}
 	return nil
 }
 
